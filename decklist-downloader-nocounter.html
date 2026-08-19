@@ -75,6 +75,23 @@
     <h1>Scryfall Decklist Image Downloader</h1>
     <p>Paste a Moxfield decklist (e.g., "4 Abundant Growth (INR) 184" or "1 Wandering Archaic // Explore the Vastlands (PSTX) 6p").</p>
     <textarea id="decklist" placeholder="e.g., 4 Abundant Growth (INR) 184"></textarea>
+    <div style="margin-bottom: 10px;">
+        <label for="language">Language:</label>
+        <select id="language">
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
+            <option value="es">Español</option>
+            <option value="it">Italiano</option>
+            <option value="pt">Português</option>
+            <option value="ja">日本語</option>
+            <option value="ko">한국어</option>
+            <option value="zht">繁體中文</option>
+            <option value="zhs">简体中文</option>
+            <option value="ru">Русский</option>
+        </select>
+        <label style="margin-left: 15px;"><input type="checkbox" id="fallback" checked> Fallback to English if unavailable</label>
+    </div>
     <button onclick="downloadImages()">Download Images</button>
     <div id="status"></div>
 
@@ -87,8 +104,18 @@
             'PLST': 'plst'
         };
 
+        async function fetchCard(setCode, collectorNumber, cardName, requestLang) {
+            let response = await fetch(`https://api.scryfall.com/cards/${setCode.toLowerCase()}/${collectorNumber}?lang=${requestLang}`);
+            if (response.ok) return await response.json();
+            response = await fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}&set=${setCode.toLowerCase()}&lang=${requestLang}`);
+            if (response.ok) return await response.json();
+            return null;
+        }
+
         async function downloadImages() {
             const decklist = document.getElementById('decklist').value.trim();
+            const lang = document.getElementById('language').value;
+            const fallbackToEnglish = document.getElementById('fallback').checked;
             const status = document.getElementById('status');
             status.textContent = 'Processing...\n';
 
@@ -100,6 +127,8 @@
             const lines = decklist.split('\n').map(line => line.trim()).filter(line => line);
             const invalidLines = [];
             const erroredCards = [];
+            const fallbackWarnings = [];
+            const fallbackUsed = [];
 
             for (const line of lines) {
                 const match = line.match(/^(\d+)\s+(.+?)\s+\(([A-Z0-9]{2,})\)\s+([A-Za-z0-9-]+)(?:\s+\*.*\*)?$/);
@@ -114,16 +143,22 @@
                 const scryfallSetCode = setCodeMap[setCode] || setCode;
 
                 try {
-                    let cardData;
-                    let response = await fetch(`https://api.scryfall.com/cards/${scryfallSetCode.toLowerCase()}/${collectorNumber}`);
-                    if (!response.ok) {
-                        response = await fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}&set=${scryfallSetCode.toLowerCase()}`);
-                        if (!response.ok) {
-                            erroredCards.push(`${cardName} (${setCode}) ${collectorNumber}: ${response.statusText}`);
-                            continue;
-                        }
+                    let cardData = await fetchCard(scryfallSetCode, collectorNumber, cardName, lang);
+                    let usedFallback = false;
+
+                    if (!cardData && lang !== 'en' && fallbackToEnglish) {
+                        cardData = await fetchCard(scryfallSetCode, collectorNumber, cardName, 'en');
+                        usedFallback = true;
                     }
-                    cardData = await response.json();
+
+                    if (!cardData) {
+                        if (lang !== 'en' && !fallbackToEnglish) {
+                            fallbackWarnings.push(`${cardName} (${setCode}) ${collectorNumber}: unavailable in selected language`);
+                        } else {
+                            erroredCards.push(`${cardName} (${setCode}) ${collectorNumber}: card not found`);
+                        }
+                        continue;
+                    }
 
                     let imageUris = [];
                     if (cardData.card_faces && ['transform', 'modal_dfc', 'double_faced_token'].includes(cardData.layout)) {
@@ -146,7 +181,8 @@
                         for (const { uri: imageUrl, name: faceName } of imageUris) {
                             const faceSuffix = imageUris.length > 1 ? `_${faceName.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
                             const copySuffix = i > 0 ? `_copy${i}` : '';
-                            const fileName = `${cardName.replace(/[^a-zA-Z0-9]/g, '_')}_${scryfallSetCode}_${collectorNumber}${copySuffix}${faceSuffix}.png`;
+                            const fallbackSuffix = usedFallback ? '_en' : '';
+                            const fileName = `${cardName.replace(/[^a-zA-Z0-9]/g, '_')}_${scryfallSetCode}_${collectorNumber}${copySuffix}${faceSuffix}${fallbackSuffix}.png`;
 
                             const imageResponse = await fetch(imageUrl);
                             if (!imageResponse.ok) {
@@ -166,6 +202,10 @@
                         }
                     }
 
+                    if (usedFallback) {
+                        fallbackUsed.push(`${cardName} (${setCode}) ${collectorNumber}`);
+                    }
+
                     await new Promise(resolve => setTimeout(resolve, 100));
                 } catch (error) {
                     erroredCards.push(`${cardName} (${setCode}) ${collectorNumber}: ${error.message}`);
@@ -175,6 +215,8 @@
             status.textContent += '\nDownload Summary:\n';
             status.textContent += invalidLines.length ? 'Invalid lines:\n' + invalidLines.map(line => `- ${line}`).join('\n') + '\n' : 'No invalid lines detected.\n';
             status.textContent += erroredCards.length ? '\nErrored cards:\n' + erroredCards.map(error => `- ${error}`).join('\n') + '\n' : '\nNo errored cards detected.\n';
+            status.textContent += fallbackWarnings.length ? '\nCards unavailable in selected language (not downloaded):\n' + fallbackWarnings.map(w => `- ${w}`).join('\n') + '\n' : '';
+            status.textContent += fallbackUsed.length ? '\nCards downloaded in English (not available in selected language):\n' + fallbackUsed.map(w => `- ${w}`).join('\n') + '\n' : '';
             status.textContent += '\nDownload complete! Check your Downloads folder.\n';
         }
     </script>
