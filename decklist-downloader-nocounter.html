@@ -106,9 +106,17 @@
 
         async function fetchCard(setCode, collectorNumber, cardName, requestLang) {
             let response = await fetch(`https://api.scryfall.com/cards/${setCode.toLowerCase()}/${collectorNumber}?lang=${requestLang}`);
-            if (response.ok) return await response.json();
+            if (response.ok) {
+                let data = await response.json();
+                if (data.lang === requestLang) return data;
+                return null;
+            }
             response = await fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(cardName)}&set=${setCode.toLowerCase()}&lang=${requestLang}`);
-            if (response.ok) return await response.json();
+            if (response.ok) {
+                let data = await response.json();
+                if (data.lang === requestLang) return data;
+                return null;
+            }
             return null;
         }
 
